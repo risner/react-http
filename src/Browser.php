@@ -12,6 +12,7 @@ use React\Http\Message\Request;
 use React\Promise\PromiseInterface;
 use React\Socket\ConnectorInterface;
 use React\Stream\ReadableStreamInterface;
+use React\Http\Cookie\CookieJar;
 use InvalidArgumentException;
 
 /**
@@ -21,6 +22,7 @@ class Browser
 {
     private $transaction;
     private $baseUrl;
+    private $cookieJar = null;
     private $protocolVersion = '1.1';
     private $defaultHeaders = array(
         'Connection' => 'close',
@@ -92,6 +94,7 @@ class Browser
             Sender::createFromLoop($loop, $connector),
             $loop
         );
+	$this->setCookieJar(new CookieJar());
     }
 
     /**
@@ -854,5 +857,34 @@ class Browser
         return $this->transaction->send(
             new Request($method, $url, $headers, $body, $this->protocolVersion)
         );
+    }
+
+    /**
+    * Returns the CookieJar handler.
+    * @return CookieJar
+    */
+    public function getCookieJar()
+    {
+	return $this->cookieJar;
+    }
+
+    /**
+    * Set the CookieJar handler.
+    * This object is responsible for managing cookies in all requests.
+    * @param CookieJar $cookieJar
+    */
+    public function setCookieJar($cookieJar) {
+	$this->cookieJar = $cookieJar;
+
+	// to work with PHP 5.3
+	$jar = &$this->cookieJar;
+	$requestCallback = function($request) use ($jar) {
+	    return $jar === null ? $request : $jar->onRequest($request);
+	};
+	$responseCallback = function($response, $request) use ($jar) {
+	    return $jar === null ? $response : $jar->onResponse($response, $request);
+	};
+	$this->transaction->addRequestHandler($requestCallback, 'browser-cookie-jar');
+	$this->transaction->addResponseHandler($responseCallback, 'browser-cookie-jar');
     }
 }

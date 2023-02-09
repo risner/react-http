@@ -21,6 +21,8 @@ class Transaction
 {
     private $sender;
     private $loop;
+    private $requestHandlerQueue;
+    private $responseHandlerQueue;
 
     // context: http.timeout (ini_get('default_socket_timeout'): 60)
     private $timeout;
@@ -42,6 +44,8 @@ class Transaction
     {
         $this->sender = $sender;
         $this->loop = $loop;
+        $this->requestHandlerQueue = array();
+        $this->responseHandlerQueue = array();
     }
 
     /**
@@ -69,6 +73,9 @@ class Transaction
     public function send(RequestInterface $request)
     {
         $state = new ClientRequestState();
+	foreach ($this->requestHandlerQueue as $handler) {
+	    $request = $handler($request);
+	}
         $deferred = new Deferred(function () use ($state) {
             if ($state->pending !== null) {
                 $state->pending->cancel();
@@ -238,6 +245,10 @@ class Transaction
     {
         $this->progress('response', array($response, $request));
 
+	foreach ($this->responseHandlerQueue as $handler) {
+	    $response = $handler($response, $request);
+	}
+
         // follow 3xx (Redirection) response status codes if Location header is present and not explicitly disabled
         // @link https://tools.ietf.org/html/rfc7231#section-6.4
         if ($this->followRedirects && ($response->getStatusCode() >= 300 && $response->getStatusCode() < 400) && $response->hasHeader('Location')) {
@@ -326,5 +337,53 @@ class Transaction
         }
 
         echo PHP_EOL;
+    }
+
+    /**
+     * Add a handler (callable object) which receives the Request object and
+     * can (or not) modify it. This handler must return a request object,
+     * whether or not there was any change.
+     * 
+     * @param callable $handler
+     * @param string $identifier Name to identify this handler in the future
+     */
+    public function addRequestHandler($handler, $identifier)
+    {
+	$this->requestHandlerQueue[$identifier] = $handler;
+    }
+
+    /**
+     * Add a handler (callable object) which receives the Response and Request objects
+     * (each one as one argument) and can (or not) modify the Response object. 
+     * This handler must return a response object, whether or not there was any change.
+     * 
+     * @param callable $handler
+     * @param string $identifier Name to identify this handler in the future
+     */
+    public function addResponseHandler($handler, $identifier)
+    {
+	$this->responseHandlerQueue[] = $handler;
+    }
+
+    /**
+     * Remove a request-handler previously added in list
+     * @param string $handlerIdentifier
+     */
+    public function removeRequestHandler($handlerIdentifier) 
+    {
+	if (isset($this->requestHandlerQueue[$handlerIdentifier])) {
+	    unset($this->requestHandlerQueue[$handlerIdentifier]);
+	}
+    }
+
+    /**
+     * Remove a response-handler previously added in list
+     * @param string $handlerIdentifier
+     */
+    public function removeResponseHandler($handlerIdentifier) 
+    {
+	if (isset($this->responseHandlerQueue[$handlerIdentifier])) {
+	    unset($this->responseHandlerQueue[$handlerIdentifier]);
+	}
     }
 }
